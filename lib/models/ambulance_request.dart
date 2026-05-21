@@ -1,3 +1,21 @@
+// ✅ Helper functions — تحويل آمن للأنواع من JSON
+double _parseDouble(dynamic value) {
+  if (value == null) return 0.0;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? 0.0;
+  return 0.0;
+}
+
+int _parseInt(dynamic value) {
+  if (value == null) return 0;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
+// ─────────────────────────────────────────────
+// AmbulanceRequest — payload لـ POST /ambulance-requests
+// ─────────────────────────────────────────────
 class AmbulanceRequest {
   final String title;
   final String severity;
@@ -27,36 +45,38 @@ class AmbulanceRequest {
     this.estimatedArrivalTime,
   });
 
-  Map<String, dynamic> toJson() => {
-    'title': title,
-    'severity': severity,
-    'hospital_id': hospitalId,
-    if (patientName != null) 'patient_name': patientName,
-    if (patientAge != null) 'patient_age': patientAge,
-    'case_classification': caseClassification,
-    if (description != null) 'description': description,
-    if (heartRate != null) 'heart_rate': heartRate,
-    if (oxygenSaturation != null) 'oxygen_saturation': oxygenSaturation,
-    if (bloodPressure != null) 'blood_pressure': bloodPressure,
-    if (bodyTemperature != null) 'body_temperature': bodyTemperature,
-    if (estimatedArrivalTime != null) 'estimated_arrival_time': estimatedArrivalTime,
-  };
+  Map<String, dynamic> toJson() {
+    // ✅ FIX: الحقول الاختيارية لا تُرسَل إطلاقاً عند كونها null
+    // (لتجنب خطأ 422 من الـ API بسبب إرسال null لحقول اختيارية)
+    final map = <String, dynamic>{
+      'title': title,
+      'severity': severity,
+      'hospital_id': hospitalId,
+      'case_classification': caseClassification,
+    };
+    if (patientName != null && patientName!.isNotEmpty) {
+      map['patient_name'] = patientName;
+    }
+    if (patientAge != null) map['patient_age'] = patientAge;
+    if (description != null && description!.isNotEmpty) {
+      map['description'] = description;
+    }
+    if (heartRate != null) map['heart_rate'] = heartRate;
+    if (oxygenSaturation != null) map['oxygen_saturation'] = oxygenSaturation;
+    if (bloodPressure != null && bloodPressure!.isNotEmpty) {
+      map['blood_pressure'] = bloodPressure;
+    }
+    if (bodyTemperature != null) map['body_temperature'] = bodyTemperature;
+    if (estimatedArrivalTime != null) {
+      map['estimated_arrival_time'] = estimatedArrivalTime;
+    }
+    return map;
+  }
 }
 
-double _parseDouble(dynamic value) {
-  if (value == null) return 0.0;
-  if (value is num) return value.toDouble();
-  if (value is String) return double.tryParse(value) ?? 0.0;
-  return 0.0;
-}
-
-int _parseInt(dynamic value) {
-  if (value == null) return 0;
-  if (value is num) return value.toInt();
-  if (value is String) return int.tryParse(value) ?? 0;
-  return 0;
-}
-
+// ─────────────────────────────────────────────
+// Hospital — من response الـ GET /hospitals/search
+// ─────────────────────────────────────────────
 class Hospital {
   final int id;
   final String name;
@@ -67,6 +87,7 @@ class Hospital {
   final String occupancyLoadAr;
   final int activeCasesCount;
   final int matchScore;
+  final double virtualDistance; // ✅ FIX: أضيف virtual_distance الموجود في الـ API
   final String? treatments;
   final String? phone;
   final double lat;
@@ -82,6 +103,7 @@ class Hospital {
     required this.occupancyLoadAr,
     required this.activeCasesCount,
     required this.matchScore,
+    required this.virtualDistance,
     this.treatments,
     this.phone,
     required this.lat,
@@ -93,11 +115,14 @@ class Hospital {
     name: json['name']?.toString() ?? '',
     distance: _parseDouble(json['distance']),
     drivingDistance: _parseDouble(json['driving_distance']),
-    estimatedDrivingTimeMins: _parseInt(json['estimated_driving_time_mins']),
+    estimatedDrivingTimeMins:
+    _parseInt(json['estimated_driving_time_mins']),
     occupancyLoad: json['occupancy_load']?.toString() ?? 'medium',
     occupancyLoadAr: json['occupancy_load_ar']?.toString() ?? '',
     activeCasesCount: _parseInt(json['active_cases_count']),
     matchScore: _parseInt(json['match_score']),
+    // ✅ FIX: virtual_distance كان مفقوداً تماماً في الكود الأصلي
+    virtualDistance: _parseDouble(json['virtual_distance']),
     treatments: json['treatments']?.toString(),
     phone: json['phone']?.toString(),
     lat: _parseDouble(json['lat']),
@@ -105,12 +130,17 @@ class Hospital {
   );
 }
 
+// ─────────────────────────────────────────────
+// RequestStatus — من response الـ GET /ambulance-requests
+// ─────────────────────────────────────────────
 class RequestStatus {
   final int id;
   final String title;
   final String severity;
   final String status;
   final String hospitalName;
+  final String? hospitalPhone; // ✅ FIX: أضيف phone المستشفى الموجود في الـ API
+  final int hospitalId;        // ✅ FIX: أضيف hospital id
   final int? estimatedArrivalTime;
   final String? acknowledgedAt;
   final String createdAt;
@@ -121,19 +151,34 @@ class RequestStatus {
     required this.severity,
     required this.status,
     required this.hospitalName,
+    this.hospitalPhone,
+    required this.hospitalId,
     this.estimatedArrivalTime,
     this.acknowledgedAt,
     required this.createdAt,
   });
 
-  factory RequestStatus.fromJson(Map<String, dynamic> json) => RequestStatus(
-    id: _parseInt(json['id']),
-    title: json['title']?.toString() ?? '',
-    severity: json['severity']?.toString() ?? 'low',
-    status: json['status']?.toString() ?? 'pending',
-    hospitalName: json['hospital']?['name']?.toString() ?? '',
-    estimatedArrivalTime: json['estimated_arrival_time'] != null ? _parseInt(json['estimated_arrival_time']) : null,
-    acknowledgedAt: json['acknowledged_at']?.toString(),
-    createdAt: json['created_at']?.toString() ?? '',
-  );
+  // ✅ FIX: الـ API يعيد status بقيم: pending / accepted / rejected
+  bool get isPending => status == 'pending';
+  bool get isAccepted => status == 'accepted';
+  bool get isRejected => status == 'rejected';
+
+  factory RequestStatus.fromJson(Map<String, dynamic> json) {
+    final hospital = json['hospital'] as Map<String, dynamic>?;
+    return RequestStatus(
+      id: _parseInt(json['id']),
+      title: json['title']?.toString() ?? '',
+      severity: json['severity']?.toString() ?? 'low',
+      status: json['status']?.toString() ?? 'pending',
+      hospitalName: hospital?['name']?.toString() ?? '',
+      // ✅ FIX: استخراج phone و id من nested hospital object
+      hospitalPhone: hospital?['phone']?.toString(),
+      hospitalId: _parseInt(hospital?['id']),
+      estimatedArrivalTime: json['estimated_arrival_time'] != null
+          ? _parseInt(json['estimated_arrival_time'])
+          : null,
+      acknowledgedAt: json['acknowledged_at']?.toString(),
+      createdAt: json['created_at']?.toString() ?? '',
+    );
+  }
 }

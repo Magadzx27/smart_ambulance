@@ -14,7 +14,8 @@ class HospitalSelectionScreen extends StatefulWidget {
   });
 
   @override
-  State<HospitalSelectionScreen> createState() => _HospitalSelectionScreenState();
+  State<HospitalSelectionScreen> createState() =>
+      _HospitalSelectionScreenState();
 }
 
 class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
@@ -24,6 +25,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ FIX: الاختيار الافتراضي هو المستشفى الأول (الأنسب حسب الخوارزمية)
     if (widget.hospitals.isNotEmpty) {
       _selectedId = widget.hospitals.first.id;
     }
@@ -34,10 +36,15 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
     setState(() => _isSending = true);
 
     try {
+      final selectedHospital =
+      widget.hospitals.firstWhere((h) => h.id == _selectedId);
+
+      // ✅ FIX: بناء الـ request النهائي بـ hospitalId الصحيح
+      // و estimatedArrivalTime من بيانات المستشفى المختار
       final finalRequest = AmbulanceRequest(
         title: widget.request.title,
         severity: widget.request.severity,
-        hospitalId: _selectedId!,
+        hospitalId: _selectedId!, // ✅ يُحدَّث هنا بالمستشفى الفعلي
         patientName: widget.request.patientName,
         patientAge: widget.request.patientAge,
         caseClassification: widget.request.caseClassification,
@@ -46,34 +53,52 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
         oxygenSaturation: widget.request.oxygenSaturation,
         bloodPressure: widget.request.bloodPressure,
         bodyTemperature: widget.request.bodyTemperature,
-        estimatedArrivalTime: widget.hospitals.firstWhere((h) => h.id == _selectedId).estimatedDrivingTimeMins,
+        // ✅ FIX: estimated_arrival_time يأتي من الـ API (estimatedDrivingTimeMins)
+        estimatedArrivalTime: selectedHospital.estimatedDrivingTimeMins,
       );
-      
+
       final response = await ApiService.sendRequest(finalRequest);
       if (!mounted) return;
-      
-      final selectedHospital = widget.hospitals.firstWhere((h) => h.id == _selectedId);
+
+      // ✅ FIX: استخراج request id بشكل آمن من الـ response
+      // الـ API يعيد: { "request": { "id": 14, ... } }
+      final requestId =
+          response['request']?['id']?.toString() ?? '---';
+
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => CaseSentScreen(
-          hospitalName: selectedHospital.name,
-          requestId: response['request']?['id']?.toString() ?? '---',
-        )),
-        (route) => route.isFirst,
+        MaterialPageRoute(
+          builder: (_) => CaseSentScreen(
+            hospitalName: selectedHospital.name,
+            requestId: requestId,
+            // ✅ FIX: تمرير phone المستشفى لـ CaseSentScreen للعرض
+            hospitalPhone: selectedHospital.phone,
+          ),
+        ),
+            (route) => route.isFirst,
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSending = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString(), style: const TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.toString(),
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
   Color _getOccupancyColor(String load) {
-    if (load == 'high') return Colors.red;
-    if (load == 'low') return Colors.green;
-    return Colors.orange;
+    // ✅ FIX: القيم تطابق ما يعيده الـ API: low / medium / high
+    switch (load) {
+      case 'high':
+        return Colors.red;
+      case 'low':
+        return Colors.green;
+      default:
+        return Colors.orange;
+    }
   }
 
   @override
@@ -83,19 +108,21 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
         foregroundColor: Colors.white,
-        title: const Text('اختيار المستشفى 🏥', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('اختيار المستشفى 🏥',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
       body: Column(
         children: [
-          // Smart selection banner
+          // ── بانر الاختيار الذكي ─────────────────────────────
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: const Color(0xFF00897B).withOpacity(0.15),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF00897B).withOpacity(0.4)),
+              border:
+              Border.all(color: const Color(0xFF00897B).withOpacity(0.4)),
             ),
             child: const Row(
               children: [
@@ -103,7 +130,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'تم اختيار المستشفيات تلقائياً بناءً على الموقع ونوع الحالة',
+                    'رُتِّبت المستشفيات تلقائياً حسب الموقع والازدحام ونوع الحالة',
                     style: TextStyle(color: Color(0xFF80CBC4), fontSize: 13),
                     textAlign: TextAlign.right,
                   ),
@@ -120,7 +147,9 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
                 children: [
                   Icon(Icons.search_off, color: Colors.white24, size: 60),
                   SizedBox(height: 16),
-                  Text('لا توجد مستشفيات متاحة', style: TextStyle(color: Colors.white38, fontSize: 16)),
+                  Text('لا توجد مستشفيات متاحة',
+                      style: TextStyle(
+                          color: Colors.white38, fontSize: 16)),
                 ],
               ),
             )
@@ -145,79 +174,134 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
                           : const Color(0xFF161B22),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: isSelected ? const Color(0xFFE53935) : Colors.white12,
+                        color: isSelected
+                            ? const Color(0xFFE53935)
+                            : Colors.white12,
                         width: isSelected ? 2 : 1,
                       ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        // ── اسم المستشفى ──────────────
                         Row(
                           children: [
                             Radio<int>(
                               value: h.id,
                               groupValue: _selectedId,
-                              onChanged: (v) => setState(() => _selectedId = v),
+                              onChanged: (v) =>
+                                  setState(() => _selectedId = v),
                               activeColor: const Color(0xFFE53935),
                             ),
                             const Spacer(),
-                            if (isBest) Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF00897B),
-                                borderRadius: BorderRadius.circular(20),
+                            if (isBest)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00897B),
+                                  borderRadius:
+                                  BorderRadius.circular(20),
+                                ),
+                                child: const Text('الأنسب ✓',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
                               ),
-                              child: const Text('الأنسب ✓', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                            ),
                             const SizedBox(width: 8),
-                            Text(h.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            Text(h.name,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold)),
                             const SizedBox(width: 8),
-                            const Icon(Icons.local_hospital, color: Color(0xFFE53935), size: 22),
+                            const Icon(Icons.local_hospital,
+                                color: Color(0xFFE53935), size: 22),
                           ],
                         ),
+
+                        // ── المسافة والوقت ────────────
                         const SizedBox(height: 8),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             Text(
                               '${h.drivingDistance.toStringAsFixed(1)} كم | ~${h.estimatedDrivingTimeMins} دقيقة',
-                              style: const TextStyle(color: Colors.white54, fontSize: 13),
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 13),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(Icons.directions_car, color: Colors.white38, size: 16),
+                            const Icon(Icons.directions_car,
+                                color: Colors.white38, size: 16),
                           ],
                         ),
+
+                        // ── الازدحام والتوافق ──────────
                         const SizedBox(height: 8),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: occColor.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: occColor.withOpacity(0.4)),
+                                border: Border.all(
+                                    color: occColor.withOpacity(0.4)),
                               ),
                               child: Text(
-                                h.occupancyLoadAr.isNotEmpty ? h.occupancyLoadAr : h.occupancyLoad,
-                                style: TextStyle(color: occColor, fontSize: 12, fontWeight: FontWeight.bold),
+                                // ✅ FIX: عرض occupancyLoadAr (النص العربي) أولاً
+                                h.occupancyLoadAr.isNotEmpty
+                                    ? h.occupancyLoadAr
+                                    : h.occupancyLoad,
+                                style: TextStyle(
+                                    color: occColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Text(
                               'حالات نشطة: ${h.activeCasesCount} | التوافق: ${h.matchScore}',
-                              style: const TextStyle(color: Colors.white60, fontSize: 12),
+                              style: const TextStyle(
+                                  color: Colors.white60, fontSize: 12),
                             ),
                           ],
                         ),
-                        if (h.treatments != null && h.treatments!.isNotEmpty) ...[
+
+                        // ── التخصصات ──────────────────
+                        if (h.treatments != null &&
+                            h.treatments!.isNotEmpty) ...[
                           const SizedBox(height: 10),
                           const Divider(color: Colors.white12),
                           const SizedBox(height: 6),
                           Text(
                             h.treatments!,
-                            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.4),
                             textAlign: TextAlign.right,
+                          ),
+                        ],
+
+                        // ✅ FIX: عرض phone المستشفى إن وُجد
+                        if (h.phone != null &&
+                            h.phone!.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(h.phone!,
+                                  style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12)),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.phone,
+                                  color: Colors.white38, size: 14),
+                            ],
                           ),
                         ],
                       ],
@@ -228,7 +312,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
             ),
           ),
 
-          // Send Button
+          // ── زر الإرسال ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(20),
             child: SizedBox(
@@ -239,14 +323,20 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE53935),
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
                 ),
                 icon: _isSending
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.send_rounded, size: 26),
                 label: Text(
                   _isSending ? 'جارٍ الإرسال...' : 'إرسال الحالة فوراً 🚨',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
