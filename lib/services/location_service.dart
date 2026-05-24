@@ -26,10 +26,9 @@ class LocationService {
         throw LocationException('تم رفض صلاحية الموقع');
       }
 
+      // ignore: deprecated_member_use
       return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+        desiredAccuracy: LocationAccuracy.high,
       );
     } on LocationException {
       rethrow;
