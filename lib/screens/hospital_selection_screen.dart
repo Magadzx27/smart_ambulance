@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/ambulance_request.dart';
 import '../services/api_service.dart';
+import '../services/location_service.dart';
 import 'case_sent_screen.dart';
 
 class HospitalSelectionScreen extends StatefulWidget {
@@ -81,6 +82,21 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
     try {
       final selectedHospital =
           widget.hospitals.firstWhere((h) => h.id == _selectedId);
+
+      // ✅ FIX: إعادة تحديث موقع المسعف قبل الإرسال
+      // الـ API يتطلب موقع حديث وإلا يرفض الطلب
+      try {
+        await ApiService.updateLocation(
+            widget.paramedicLat, widget.paramedicLng);
+      } catch (_) {
+        // نحاول جلب موقع جديد إذا فشل التحديث بالإحداثيات المحفوظة
+        try {
+          final pos = await LocationService.getCurrentPosition();
+          if (pos != null) {
+            await ApiService.updateLocation(pos.latitude, pos.longitude);
+          }
+        } catch (_) {}
+      }
 
       final finalRequest = AmbulanceRequest(
         title: widget.request.title,
