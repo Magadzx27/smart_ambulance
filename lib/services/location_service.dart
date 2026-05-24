@@ -27,7 +27,10 @@ class LocationService {
       }
 
       return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
       );
     } on LocationException {
       rethrow;
