@@ -83,13 +83,11 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
       final selectedHospital =
           widget.hospitals.firstWhere((h) => h.id == _selectedId);
 
-      // ✅ FIX: إعادة تحديث موقع المسعف قبل الإرسال
-      // الـ API يتطلب موقع حديث وإلا يرفض الطلب
+      // إعادة تحديث موقع المسعف قبل الإرسال
       try {
         await ApiService.updateLocation(
             widget.paramedicLat, widget.paramedicLng);
       } catch (_) {
-        // نحاول جلب موقع جديد إذا فشل التحديث بالإحداثيات المحفوظة
         try {
           final pos = await LocationService.getCurrentPosition();
           if (pos != null) {
@@ -157,7 +155,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
   List<Marker> _buildMarkers() {
     final markers = <Marker>[];
 
-    // ── Marker موقع المسعف (أزرق) ──
+    // Marker موقع المسعف
     markers.add(
       Marker(
         point: LatLng(widget.paramedicLat, widget.paramedicLng),
@@ -167,7 +165,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
       ),
     );
 
-    // ── Markers المستشفيات ──
+    // Markers المستشفيات
     for (int i = 0; i < widget.hospitals.length; i++) {
       final h = widget.hospitals[i];
       final isSelected = _selectedId == h.id;
@@ -176,39 +174,47 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
       markers.add(
         Marker(
           point: LatLng(h.lat, h.lng),
-          width: 160,
-          height: 65,
+          width: isSelected ? 180 : 160,
+          height: isSelected ? 75 : 65,
           child: GestureDetector(
             onTap: () {
               setState(() => _selectedId = h.id);
+              _animateToHospital(h);
             },
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // اسم المستشفى فوق الـ marker
-                Container(
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? const Color(0xFFE53935)
                         : isBest
                             ? const Color(0xFF00897B)
-                            : const Color(0xFF1E1E2E),
-                    borderRadius: BorderRadius.circular(8),
+                            : const Color(0xFF1E1E2E).withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected || isBest ? Colors.transparent : Colors.white24,
+                      width: 1,
+                    ),
                     boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.5),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
+                      if (isSelected || isBest)
+                        BoxShadow(
+                          color: isSelected
+                              ? const Color(0xFFE53935).withValues(alpha: 0.5)
+                              : const Color(0xFF00897B).withValues(alpha: 0.5),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
                     ],
                   ),
                   child: Text(
                     isBest ? '⭐ ${h.name}' : h.name,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 10,
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
                     maxLines: 1,
@@ -216,7 +222,6 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
                   ),
                 ),
                 const SizedBox(height: 2),
-                // أيقونة الـ pin
                 Icon(
                   Icons.location_on,
                   color: isSelected
@@ -224,7 +229,7 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
                       : isBest
                           ? const Color(0xFF00897B)
                           : Colors.white70,
-                  size: isSelected ? 32 : 26,
+                  size: isSelected ? 36 : 28,
                 ),
               ],
             ),
@@ -232,7 +237,6 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
         ),
       );
     }
-
     return markers;
   }
 
@@ -240,260 +244,504 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        foregroundColor: Colors.white,
-        title: const Text('اختيار المستشفى 🏥',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: CircleAvatar(
+            backgroundColor: const Color(0xFF161B22).withValues(alpha: 0.8),
+            child: const BackButton(color: Colors.white),
+          ),
+        ),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // ══════════════════════════════════════════════════════
-          // ── الخريطة التفاعلية ──────────────────────────────
-          // ══════════════════════════════════════════════════════
-          Container(
-            height: MediaQuery.of(context).size.height * 0.32,
-            margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: const Color(0xFFE53935).withOpacity(0.3), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFE53935).withOpacity(0.08),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+          // ── 1. الخريطة (Full Screen) ──
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCameraFit: CameraFit.bounds(
+                bounds: _calculateBounds(),
+                // padding لحساب المساحة السفلية (للبطاقة أو القائمة)
+                padding: const EdgeInsets.only(top: 150, bottom: 350, left: 40, right: 40),
+              ),
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
+              onTap: (_, __) => setState(() => _selectedId = null),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCameraFit: CameraFit.bounds(
-                      bounds: _calculateBounds(),
-                      padding: const EdgeInsets.all(40),
+            children: [
+              TileLayer(
+                urlTemplate:
+                    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.smartambulance.app',
+              ),
+              if (_selectedId != null)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: [
+                        LatLng(widget.paramedicLat, widget.paramedicLng),
+                        LatLng(
+                          widget.hospitals
+                              .firstWhere((h) => h.id == _selectedId)
+                              .lat,
+                          widget.hospitals
+                              .firstWhere((h) => h.id == _selectedId)
+                              .lng,
+                        ),
+                      ],
+                      color: const Color(0xFFE53935).withValues(alpha: 0.6),
+                      strokeWidth: 2.5,
+                      pattern: const StrokePattern.dotted(),
                     ),
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.all,
-                    ),
-                  ),
-                  children: [
-                    // ── طبقة الخريطة (Dark theme) ──
-                    TileLayer(
-                      urlTemplate:
-                          'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                      subdomains: const ['a', 'b', 'c', 'd'],
-                      userAgentPackageName: 'com.smartambulance.app',
-                    ),
-                    // ── خط بين المسعف والمستشفى المختار ──
-                    if (_selectedId != null)
-                      PolylineLayer(
-                        polylines: [
-                          Polyline(
-                            points: [
-                              LatLng(widget.paramedicLat, widget.paramedicLng),
-                              LatLng(
-                                widget.hospitals
-                                    .firstWhere((h) => h.id == _selectedId)
-                                    .lat,
-                                widget.hospitals
-                                    .firstWhere((h) => h.id == _selectedId)
-                                    .lng,
-                              ),
-                            ],
-                            color:
-                                const Color(0xFFE53935).withOpacity(0.6),
-                            strokeWidth: 2.5,
-                            pattern: const StrokePattern.dotted(),
-                          ),
-                        ],
-                      ),
-                    // ── Markers ──
-                    MarkerLayer(markers: _buildMarkers()),
                   ],
                 ),
+              MarkerLayer(markers: _buildMarkers()),
+            ],
+          ),
 
-                // ── بادج "موقعي" ──
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1565C0).withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('موقعي',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold)),
-                        SizedBox(width: 4),
-                        Icon(Icons.my_location, color: Colors.white, size: 14),
-                      ],
-                    ),
+          // ── 2. البانر الذكي العائم ──
+          Positioned(
+            top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF161B22).withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF00897B).withValues(alpha: 0.4)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-
-                // ── زر إعادة التوسيط ──
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: GestureDetector(
-                    onTap: () {
-                      _mapController.fitCamera(
-                        CameraFit.bounds(
-                          bounds: _calculateBounds(),
-                          padding: const EdgeInsets.all(40),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E2E).withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: Colors.white24),
+                ],
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Color(0xFF00897B), size: 22),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'المستشفيات مرتبة آلياً حسب الازدحام ومسافة الطريق للحالة',
+                      style: TextStyle(
+                        color: Color(0xFF80CBC4),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
-                      child: const Icon(Icons.fit_screen_rounded,
-                          color: Colors.white70, size: 18),
+                      textAlign: TextAlign.right,
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
-          // ── بانر الاختيار الذكي ─────────────────────────────
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00897B).withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: const Color(0xFF00897B).withOpacity(0.4)),
-            ),
-            child: const Row(
+          // ── 3. أزرار التحكم بالخريطة (يمين) ──
+          Positioned(
+            top: MediaQuery.of(context).padding.top + kToolbarHeight + 90,
+            right: 16,
+            child: Column(
               children: [
-                Icon(Icons.auto_awesome, color: Color(0xFF00897B), size: 18),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'رُتِّبت المستشفيات تلقائياً حسب الموقع والازدحام ونوع الحالة',
-                    style: TextStyle(color: Color(0xFF80CBC4), fontSize: 12),
-                    textAlign: TextAlign.right,
-                  ),
+                _buildMapBtn(
+                  icon: Icons.my_location,
+                  onTap: () {
+                    _mapController.move(
+                        LatLng(widget.paramedicLat, widget.paramedicLng), 15);
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildMapBtn(
+                  icon: Icons.fit_screen_rounded,
+                  onTap: () {
+                    _mapController.fitCamera(
+                      CameraFit.bounds(
+                        bounds: _calculateBounds(),
+                        padding: const EdgeInsets.only(
+                            top: 150, bottom: 350, left: 40, right: 40),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
           ),
 
-          // ══════════════════════════════════════════════════════
-          // ── قائمة المستشفيات ────────────────────────────────
-          // ══════════════════════════════════════════════════════
-          Expanded(
-            child: widget.hospitals.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.search_off, color: Colors.white24, size: 60),
-                        SizedBox(height: 16),
-                        Text('لا توجد مستشفيات متاحة',
-                            style: TextStyle(
-                                color: Colors.white38, fontSize: 16)),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    itemCount: widget.hospitals.length,
-                    itemBuilder: (_, i) {
-                      final h = widget.hospitals[i];
-                      final isSelected = _selectedId == h.id;
-                      final isBest = i == 0;
-                      final occColor = _getOccupancyColor(h.occupancyLoad);
+          // ── 4. البطاقة العائمة أو قائمة المستشفيات ──
+          if (_selectedId != null)
+            Positioned(
+              bottom: 24,
+              left: 16,
+              right: 16,
+              child: _buildSelectedHospitalCard(),
+            )
+          else
+            DraggableScrollableSheet(
+              initialChildSize: 0.35,
+              minChildSize: 0.15,
+              maxChildSize: 0.65,
+              builder: (context, scrollController) =>
+                  _buildHospitalListSheet(scrollController),
+            ),
+        ],
+      ),
+    );
+  }
 
-                      return GestureDetector(
-                        onTap: () {
-                          setState(() => _selectedId = h.id);
-                          _animateToHospital(h);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFFE53935).withOpacity(0.1)
-                                : const Color(0xFF161B22),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isSelected
-                                  ? const Color(0xFFE53935)
-                                  : Colors.white12,
-                              width: isSelected ? 2 : 1,
+  // ── زر تحكم الخريطة ──
+  Widget _buildMapBtn({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: const Color(0xFF161B22).withValues(alpha: 0.95),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
+
+  // ── بناء بطاقة المستشفى المحدد (التي تحتوي زر الإرسال) ──
+  Widget _buildSelectedHospitalCard() {
+    final h = widget.hospitals.firstWhere((e) => e.id == _selectedId);
+    final occColor = _getOccupancyColor(h.occupancyLoad);
+    final isBest = widget.hospitals.first.id == h.id;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22).withValues(alpha: 0.98),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // الهيدر مع زر الإغلاق
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () => setState(() => _selectedId = null),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white12,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white54, size: 18),
+                ),
+              ),
+              const Spacer(),
+              if (isBest)
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00897B),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'الأنسب ✓',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              Flexible(
+                child: Text(
+                  h.name,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE53935).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.local_hospital,
+                    color: Color(0xFFE53935), size: 22),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white12, height: 1),
+          const SizedBox(height: 12),
+
+          // معلومات المستشفى (مسافة + ازدحام)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _buildInfoPill(
+                icon: Icons.directions_car,
+                text: '${h.drivingDistance.toStringAsFixed(1)} كم | ~${h.estimatedDrivingTimeMins} د',
+                color: Colors.white70,
+                bgColor: Colors.white10,
+              ),
+              const SizedBox(width: 8),
+              _buildInfoPill(
+                icon: Icons.group,
+                text: h.occupancyLoadAr.isNotEmpty ? h.occupancyLoadAr : h.occupancyLoad,
+                color: occColor,
+                bgColor: occColor.withValues(alpha: 0.15),
+              ),
+            ],
+          ),
+          if (h.treatments != null && h.treatments!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              h.treatments!,
+              style: const TextStyle(
+                  color: Colors.white54, fontSize: 11, height: 1.4),
+              textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // زر الإرسال
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: ElevatedButton.icon(
+              onPressed: _isSending ? null : _sendCase,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 0,
+              ),
+              icon: _isSending
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.send_rounded, size: 22),
+              label: Text(
+                _isSending ? 'جارٍ الإرسال...' : 'إرسال الحالة فوراً 🚨',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoPill({
+    required IconData icon,
+    required String text,
+    required Color color,
+    required Color bgColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 6),
+          Icon(icon, size: 14, color: color),
+        ],
+      ),
+    );
+  }
+
+  // ── بناء قائمة المستشفيات (Bottom Sheet) ──
+  Widget _buildHospitalListSheet(ScrollController scrollController) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF161B22),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 20,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          // مقبض السحب (Handle)
+          Container(
+            width: 48,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // عنوان القائمة
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00897B).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${widget.hospitals.length}',
+                    style: const TextStyle(
+                      color: Color(0xFF80CBC4),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                const Text(
+                  'المستشفيات المتاحة',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white12, height: 1),
+          // القائمة
+          Expanded(
+            child: ListView.separated(
+              controller: scrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              itemCount: widget.hospitals.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final h = widget.hospitals[i];
+                final occColor = _getOccupancyColor(h.occupancyLoad);
+                final isBest = i == 0;
+
+                return InkWell(
+                  onTap: () {
+                    setState(() => _selectedId = h.id);
+                    _animateToHospital(h);
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E2E),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      children: [
+                        // أيقونة الحالة
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: occColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(Icons.local_hospital,
+                                  color: occColor, size: 20),
                             ),
-                          ),
+                            const SizedBox(height: 6),
+                            Text(
+                              h.occupancyLoadAr.isNotEmpty
+                                  ? h.occupancyLoadAr
+                                  : h.occupancyLoad,
+                              style: TextStyle(
+                                  color: occColor,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        // التفاصيل
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              // ── اسم المستشفى ──────────────
                               Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
-                                  Radio<int>(
-                                    value: h.id,
-                                    groupValue: _selectedId,
-                                    onChanged: (v) {
-                                      setState(() => _selectedId = v);
-                                      _animateToHospital(h);
-                                    },
-                                    activeColor: const Color(0xFFE53935),
-                                  ),
-                                  const Spacer(),
                                   if (isBest)
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 3),
+                                          horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: const Color(0xFF00897B),
-                                        borderRadius:
-                                            BorderRadius.circular(20),
+                                        borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: const Text('الأنسب ✓',
+                                      child: const Text('الأنسب',
                                           style: TextStyle(
                                               color: Colors.white,
-                                              fontSize: 11,
+                                              fontSize: 9,
                                               fontWeight: FontWeight.bold)),
                                     ),
                                   const SizedBox(width: 8),
                                   Flexible(
-                                    child: Text(h.name,
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold),
-                                        overflow: TextOverflow.ellipsis),
+                                    child: Text(
+                                      h.name,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.local_hospital,
-                                      color: Color(0xFFE53935), size: 20),
                                 ],
                               ),
-
-                              // ── المسافة والوقت ────────────
                               const SizedBox(height: 6),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
@@ -505,112 +753,17 @@ class _HospitalSelectionScreenState extends State<HospitalSelectionScreen>
                                   ),
                                   const SizedBox(width: 4),
                                   const Icon(Icons.directions_car,
-                                      color: Colors.white38, size: 15),
+                                      color: Colors.white38, size: 14),
                                 ],
                               ),
-
-                              // ── الازدحام والتوافق ──────────
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: occColor.withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                          color: occColor.withOpacity(0.4)),
-                                    ),
-                                    child: Text(
-                                      h.occupancyLoadAr.isNotEmpty
-                                          ? h.occupancyLoadAr
-                                          : h.occupancyLoad,
-                                      style: TextStyle(
-                                          color: occColor,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'حالات: ${h.activeCasesCount} | التوافق: ${h.matchScore}',
-                                    style: const TextStyle(
-                                        color: Colors.white60, fontSize: 11),
-                                  ),
-                                ],
-                              ),
-
-                              // ── التخصصات ──────────────────
-                              if (h.treatments != null &&
-                                  h.treatments!.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                const Divider(color: Colors.white12),
-                                const SizedBox(height: 4),
-                                Text(
-                                  h.treatments!,
-                                  style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 11,
-                                      height: 1.4),
-                                  textAlign: TextAlign.right,
-                                ),
-                              ],
-
-                              // ── هاتف المستشفى ──────────────
-                              if (h.phone != null &&
-                                  h.phone!.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Text(h.phone!,
-                                        style: const TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 11)),
-                                    const SizedBox(width: 4),
-                                    const Icon(Icons.phone,
-                                        color: Colors.white38, size: 13),
-                                  ],
-                                ),
-                              ],
                             ],
                           ),
                         ),
-                      );
-                    },
+                      ],
+                    ),
                   ),
-          ),
-
-          // ── زر الإرسال ──────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                onPressed:
-                    (_selectedId == null || _isSending) ? null : _sendCase,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                ),
-                icon: _isSending
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.send_rounded, size: 24),
-                label: Text(
-                  _isSending ? 'جارٍ الإرسال...' : 'إرسال الحالة فوراً 🚨',
-                  style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.bold),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -672,10 +825,10 @@ class _PulsingDotState extends State<_PulsingDot>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: const Color(0xFF42A5F5)
-                    .withOpacity(_opacityAnim.value * 0.4),
+                    .withValues(alpha: _opacityAnim.value * 0.4),
                 border: Border.all(
                   color: const Color(0xFF42A5F5)
-                      .withOpacity(_opacityAnim.value),
+                      .withValues(alpha: _opacityAnim.value),
                   width: 2,
                 ),
               ),
@@ -692,7 +845,7 @@ class _PulsingDotState extends State<_PulsingDot>
             border: Border.all(color: Colors.white, width: 2.5),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF1E88E5).withOpacity(0.5),
+                color: const Color(0xFF1E88E5).withValues(alpha: 0.5),
                 blurRadius: 8,
               ),
             ],
