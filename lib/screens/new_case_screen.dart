@@ -135,6 +135,8 @@ class _NewCaseScreenState extends State<NewCaseScreen> {
       MaterialPageRoute(
         builder: (_) => HospitalSelectionScreen(
           hospitals: hospitals,
+          paramedicLat: position?.latitude ?? 0,
+          paramedicLng: position?.longitude ?? 0,
           request: AmbulanceRequest(
             title: title,
             severity: _severity,
